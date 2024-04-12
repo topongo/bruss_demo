@@ -1,0 +1,80 @@
+<html>
+  <head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+    #map { height: 800px; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJECTS.stops)">
+    <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJECTS.segments)">
+    <input type="button" value="Draw" onclick="draw()">
+  </body>
+  <script>
+    var map = L.map('map').setView([46.0620, 11.1294], 14);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const MAP_OBJECTS = {
+      stops: null,
+      segments: null,
+      user_segments: L.layerGroup().addTo(map)
+    }
+
+    fetch("http://localhost:8000/api/v1/map/segments", {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})})
+      .then(r => r.json()
+        .then(segments => {
+          let segments_gruop = L.layerGroup()
+          segments.forEach(s => {
+            L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(segments_gruop); 
+          })
+          MAP_OBJECTS.segments = segments_gruop
+          console.log(`Fetching ${segments.length} segments!`)
+        })
+      )
+      .catch(e => console.error(e))
+
+    fetch("http://localhost:8000/api/v1/map/stops")
+      .then(r => r.json()
+        .then(stops => { 
+          let stops_group = L.layerGroup()
+          stops.forEach(s => {
+            L.circle(
+              [s.position[1], s.position[0]],
+              {radius: 10}
+            )
+              .bindTooltip(`${s.name} <${s.id}>`)
+              .addTo(stops_group)
+          })
+            // .then(() => console.log("Finished fetching"))
+          MAP_OBJECTS.stops = stops_group
+          console.log(`Fetching ${stops.length} stops!`)
+        })
+        .catch(e => console.error(e))
+      )
+      .catch(e => console.error(e))
+
+    function draw() {
+      let input = prompt("Paste here json-encoded coords")
+      try {
+        const line = JSON.parse(input)
+        L.polyline(line, {color: "green"}).addTo(MAP_OBJECTS.user_segments)
+      } catch(e) {
+        throw e
+        // alert(JSON.stringify(e))
+      }
+    }
+
+    function toggle_layer(obj) {
+      if(map.hasLayer(obj)) {
+        obj.removeFrom(map)
+      } else {
+        obj.addTo(map)
+      }
+    }
+  </script>
+</html>
