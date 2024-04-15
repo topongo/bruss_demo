@@ -3,14 +3,48 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
-    #map { height: 800px; }
+      #map { height: 90vh; }
+
+      .lds-circle {
+          display: inline-block;
+          transform: translateZ(1px);
+        }
+        .lds-circle > div {
+          display: inline-block;
+          width: 2em;
+          height: 2em;
+          border-radius: 50%;
+          background: #000;
+          animation: lds-circle 2.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+        }
+        @keyframes lds-circle {
+          0%, 100% {
+            animation-timing-function: cubic-bezier(0.5, 0, 1, 0.5);
+          }
+          0% {
+            transform: rotateY(0deg);
+          }
+          50% {
+            transform: rotateY(1800deg);
+            animation-timing-function: cubic-bezier(0, 0.5, 0.5, 1);
+          }
+          100% {
+            transform: rotateY(3600deg);
+          } 
+        }
+        
+        .hidden {
+          display: none;
+        }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJECTS.stops)">
-    <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJECTS.segments)">
-    <input type="button" value="Draw" onclick="draw()">
+    <div id="control_panel" style="display: flex; ">
+      <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJECTS.stops)">
+      <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJECTS.segments)">
+      <input type="button" value="Draw" onclick="draw()">
+    </div>
   </body>
   <script>
     var map = L.map('map').setView([46.0620, 11.1294], 14);
@@ -22,41 +56,63 @@
     const MAP_OBJECTS = {
       stops: null,
       segments: null,
+      routes: null,
       user_segments: L.layerGroup().addTo(map)
     }
 
-    fetch("http://localhost:8000/api/v1/map/segments", {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})})
-      .then(r => r.json()
-        .then(segments => {
-          let segments_gruop = L.layerGroup()
-          segments.forEach(s => {
-            L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(segments_gruop); 
-          })
-          MAP_OBJECTS.segments = segments_gruop
-          console.log(`Fetching ${segments.length} segments!`)
-        })
-      )
-      .catch(e => console.error(e))
+    const API = {
+      host: "localhost",
+      port: 8000,
+      url: "/api/v1/"
+    }
 
-    fetch("http://localhost:8000/api/v1/map/stops")
-      .then(r => r.json()
-        .then(stops => { 
-          let stops_group = L.layerGroup()
-          stops.forEach(s => {
-            L.circle(
-              [s.position[1], s.position[0]],
-              {radius: 10}
-            )
-              .bindTooltip(`${s.name} <${s.id}>`)
-              .addTo(stops_group)
-          })
-            // .then(() => console.log("Finished fetching"))
-          MAP_OBJECTS.stops = stops_group
-          console.log(`Fetching ${stops.length} stops!`)
-        })
-        .catch(e => console.error(e))
-      )
+    let futures = []
+
+    futures.push(bruss_api(
+      "map/segments",
+      {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})},
+      segments => {
+        let segments_gruop = L.layerGroup()
+        Promise.all(segments.map(async s => {
+          L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(segments_gruop); 
+        }))
+        MAP_OBJECTS.segments = segments_gruop
+        console.log(`Fetched ${segments.length} segments!`)
+      })
       .catch(e => console.error(e))
+    )
+
+    futures.push(bruss_api(
+      "map/stops",
+      stops => { 
+        let stops_group = L.layerGroup()
+        Promise.all(stops.map(async s => {
+          L.circle(
+            s.position,
+            {radius: 10}
+          )
+            .bindTooltip(`${s.name} <${s.id}>`)
+            .addTo(stops_group)
+        }))
+          // .then(() => console.log("Finished fetching"))
+        MAP_OBJECTS.stops = stops_group
+        console.log(`Fetched ${stops.length} stops!`)
+      })
+      .catch(e => console.error(e))
+    )
+
+    futures.push(bruss_api(
+      "map/routes",
+      routes => {
+        MAP_OBJECTS.routes = routes
+      }
+    ))
+
+    Promise.all(futures)
+      .then(() => {
+        console.log("Done, hiding loader")
+        hideLoader(loader)
+      })
 
     function draw() {
       let input = prompt("Paste here json-encoded coords")
@@ -76,5 +132,39 @@
         obj.addTo(map)
       }
     }
+
+    async function bruss_api(url, settings, then) {
+      return fetch(`http://${API.host}:${API.port}${API.url}${url}`, settings)
+        .then(r => r.json(then))
+        .catch(e => {
+          console.log(e)
+          alert(e)
+        })
+    }
   </script>
+
+<script>
+    function appendLoader(parent, text=null, hidden=false) {
+        let out = document.createElement("div")
+        if (hidden)
+            out.classList.add("hidden")
+        let inn = document.createElement("div")
+        inn.appendChild(document.createElement("div"))
+        inn.classList.add("lds-circle")
+        out.appendChild(inn)
+        out.innerHTML += "<span>" + (text === null ? "Loading..." : text) + "</span>"
+        parent.appendChild(out)
+        return out
+    }
+
+    function hideLoader(loader) {
+        loader.classList.add("hidden")
+    }
+
+    function showLoader(loader) {
+        loader.classList.remove("hidden")
+    }
+
+    const loader = appendLoader(document.getElementById("control_panel"), "")
+</script>
 </html>
