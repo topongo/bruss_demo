@@ -43,7 +43,12 @@
     <div id="control_panel" style="display: flex; ">
       <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJ.stops)">
       <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJ.segments)">
-      <input type="button" value="Draw" onclick="draw()">
+      <input type="button" value="Draw" onclick="draw()"> 
+    </div>
+    <div id="selector">
+      <select id="area">
+        <option value="">---</option>
+      </select>
     </div>
   </body>
   <script>
@@ -73,7 +78,7 @@
       segments => {
         MAP_OBJ.segments = L.layerGroup()
         Promise.all(segments.map(async s => {
-          L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(MAP_OBJ.segments); 
+          L.polyline(s.coords, {color: "red", weight: 3, opacity: 0.1}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(MAP_OBJ.segments); 
         }))
           .then(() => console.log(`Fetched ${MAP_OBJ.segments.length} segments!`))
       },
@@ -98,7 +103,20 @@
     futures.push(bruss_api(
       "map/routes",
       routes => {
-        MAP_OBJ.routes = routes
+        MAP_OBJ.routes = {}
+        routes.forEach(r => {
+          MAP_OBJ.routes[r.id] = r
+        })
+      }
+    ))
+
+    futures.push(bruss_api(
+      "map/areas",
+      areas => {
+        MAP_OBJ.areas = {}
+        areas.forEach(a => {
+          MAP_OBJ.areas[a.id] = a
+        })
       }
     ))
 
