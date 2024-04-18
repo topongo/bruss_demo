@@ -41,8 +41,8 @@
   <body>
     <div id="map"></div>
     <div id="control_panel" style="display: flex; ">
-      <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJECTS.stops)">
-      <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJECTS.segments)">
+      <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJ.stops)">
+      <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJ.segments)">
       <input type="button" value="Draw" onclick="draw()">
     </div>
   </body>
@@ -53,7 +53,7 @@
         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
 
-    const MAP_OBJECTS = {
+    const MAP_OBJ = {
       stops: null,
       segments: null,
       routes: null,
@@ -70,41 +70,35 @@
 
     futures.push(bruss_api(
       "map/segments",
-      {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})},
       segments => {
-        let segments_gruop = L.layerGroup()
+        MAP_OBJ.segments = L.layerGroup()
         Promise.all(segments.map(async s => {
-          L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(segments_gruop); 
+          L.polyline(s.coords, {color: "red"}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(MAP_OBJ.segments); 
         }))
-        MAP_OBJECTS.segments = segments_gruop
-        console.log(`Fetched ${segments.length} segments!`)
-      })
-      .catch(e => console.error(e))
-    )
+          .then(() => console.log(`Fetched ${MAP_OBJ.segments.length} segments!`))
+      },
+      {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})},
+    ))
 
     futures.push(bruss_api(
       "map/stops",
       stops => { 
-        let stops_group = L.layerGroup()
+        console.log(`Got ${stops.length} from API`)
+        MAP_OBJ.stops = L.layerGroup()
         Promise.all(stops.map(async s => {
           L.circle(
             s.position,
             {radius: 10}
-          )
-            .bindTooltip(`${s.name} <${s.id}>`)
-            .addTo(stops_group)
+          ).bindTooltip(`${s.name} <${s.id}>`).addTo(MAP_OBJ.stops)
         }))
-          // .then(() => console.log("Finished fetching"))
-        MAP_OBJECTS.stops = stops_group
-        console.log(`Fetched ${stops.length} stops!`)
+          .then(() => console.log(`Fetched ${MAP_OBJ.stops.length} segments!`))
       })
-      .catch(e => console.error(e))
     )
 
     futures.push(bruss_api(
       "map/routes",
       routes => {
-        MAP_OBJECTS.routes = routes
+        MAP_OBJ.routes = routes
       }
     ))
 
@@ -118,7 +112,7 @@
       let input = prompt("Paste here json-encoded coords")
       try {
         const line = JSON.parse(input)
-        L.polyline(line, {color: "green"}).addTo(MAP_OBJECTS.user_segments)
+        L.polyline(line, {color: "green"}).addTo(MAP_OBJ.user_segments)
       } catch(e) {
         throw e
         // alert(JSON.stringify(e))
@@ -133,11 +127,22 @@
       }
     }
 
-    async function bruss_api(url, settings, then) {
+    function bruss_api(url, then, settings=null) {
+      console.log(`Requesting ${url}, settings:`, settings)
       return fetch(`http://${API.host}:${API.port}${API.url}${url}`, settings)
-        .then(r => r.json(then))
+        .then(r => {
+          r.json()
+            .then(data => {
+              console.log("Parsed data:", data)
+              then(data)
+            })
+            .catch(e => {
+              console.error(e)
+              alert(e)
+            })
+        })
         .catch(e => {
-          console.log(e)
+          console.error(e)
           alert(e)
         })
     }
