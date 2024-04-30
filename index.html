@@ -46,7 +46,11 @@
       <input type="button" value="Draw" onclick="draw()"> 
     </div>
     <div id="selector">
-      <select id="area">
+      <select id="areas_select">
+        <option value="">---</option>
+      </select>
+      <br>
+      <select id="routes_select">
         <option value="">---</option>
       </select>
     </div>
@@ -58,11 +62,18 @@
         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
 
+    const BRUSS_CACHE = {
+      stops: {},
+      segments: SegmentContainer(),
+      routes: {},
+      trips: {},
+      paths: {},
+    }
+
     const MAP_OBJ = {
-      stops: null,
-      segments: null,
-      routes: null,
-      user_segments: L.layerGroup().addTo(map)
+      stops: L.layerGroup(),
+      segments: L.layerGroup(),
+      user_segments: L.layerGroup(),
     }
 
     const API = {
@@ -73,57 +84,61 @@
 
     let futures = []
 
-    futures.push(bruss_api(
-      "map/segments",
-      segments => {
-        MAP_OBJ.segments = L.layerGroup()
-        Promise.all(segments.map(async s => {
-          L.polyline(s.coords, {color: "red", weight: 3, opacity: 0.1}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(MAP_OBJ.segments); 
-        }))
-          .then(() => console.log(`Fetched ${MAP_OBJ.segments.length} segments!`))
-      },
-      {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})},
-    ))
+    // futures.push(bruss_api(
+    //   "map/segments",
+    //   segments => {
+    //     MAP_OBJ.segments = L.layerGroup()
+    //     Promise.all(segments.map(async s => {
+    //       L.polyline(s.coords, {color: "red", weight: 3, opacity: 0.1}).bindTooltip(`<${s.from}> --> <${s.to}>`).addTo(MAP_OBJ.segments); 
+    //     }))
+    //       .then(() => console.log(`Fetched ${MAP_OBJ.segments.length} segments!`))
+    //   },
+    //   {method: "post", headers: {"content-type": "application/json"}, body: JSON.stringify({})},
+    // ))
 
-    futures.push(bruss_api(
-      "map/stops",
-      stops => { 
-        console.log(`Got ${stops.length} from API`)
-        MAP_OBJ.stops = L.layerGroup()
-        Promise.all(stops.map(async s => {
-          L.circle(
-            s.position,
-            {radius: 10}
-          ).bindTooltip(`${s.name} <${s.id}>`).addTo(MAP_OBJ.stops)
-        }))
-          .then(() => console.log(`Fetched ${MAP_OBJ.stops.length} segments!`))
+    futures.push(bruss_api("map/stops").then(stops => { 
+      // console.log(`Got ${stops.length} from API`)
+      MAP_OBJ.stops = L.layerGroup()
+      Promise.all(stops.map(async s => {
+        const circle = L.circleMarker(
+          s.position,
+          {radius: 2, color: "black", fillOpacity: 1}
+        ).bindTooltip(`${s.name} <${s.id}>`).addTo(MAP_OBJ.stops)
+        BRUSS_CACHE.stops[s.id] = s
+        BRUSS_CACHE.stops[s.id].map_obj = circle
+        circle.bruss_obj = s
+      }))
+        .then(() => console.log(`Fetched ${MAP_OBJ.stops.length} segments!`))
+    }))
+
+    // futures.push(bruss_api(
+    //   "map/routes",
+    //   routes => {
+    //     MAP_OBJ.routes = {}
+    //     routes.forEach(r => {
+    //       MAP_OBJ.routes[r.id] = r
+    //     })
+    //   }
+    // ))
+
+    const areas_select = document.getElementById("areas_select")
+    const routes_select = document.getElementById("routes_select")
+    futures.push(bruss_api("map/areas").then(areas => {
+      BRUSS_CACHE.areas = {}
+      areas.forEach(a => {
+        BRUSS_CACHE.areas[a.id] = a
+        let opt = document.createElement("option")
+        opt.value = a.id
+        opt.innerHTML = a.label
+        areas_select.appendChild(opt)
       })
-    )
-
-    futures.push(bruss_api(
-      "map/routes",
-      routes => {
-        MAP_OBJ.routes = {}
-        routes.forEach(r => {
-          MAP_OBJ.routes[r.id] = r
-        })
-      }
-    ))
-
-    futures.push(bruss_api(
-      "map/areas",
-      areas => {
-        MAP_OBJ.areas = {}
-        areas.forEach(a => {
-          MAP_OBJ.areas[a.id] = a
-        })
-      }
-    ))
+    }))
 
     Promise.all(futures)
       .then(() => {
         console.log("Done, hiding loader")
-        hideLoader(loader)
+        hideLoader()
+        simulation()
       })
 
     function draw() {
@@ -145,49 +160,190 @@
       }
     }
 
-    function bruss_api(url, then, settings=null) {
-      console.log(`Requesting ${url}, settings:`, settings)
-      return fetch(`http://${API.host}:${API.port}${API.url}${url}`, settings)
-        .then(r => {
-          r.json()
-            .then(data => {
-              console.log("Parsed data:", data)
-              then(data)
+    async function bruss_api(url, settings=null) {
+      // console.log(`Requesting ${url}, settings:`, settings)
+      try {
+        return await (await fetch(`http://${API.host}:${API.port}${API.url}${url}`, settings)).json()
+      } catch(e) {
+        console.error(e)
+        alert(e)
+      }
+    }
+
+    areas_select.addEventListener("change", e => {
+      routes_select.innerHTML = ""
+      routes_select.appendChild(OptionFactory("", "---").b())
+      showLoader()
+      bruss_api("map/routes?" + new URLSearchParams({area: areas_select.value})).then(routes => {
+        Promise.all(routes.map(async r => {
+          BRUSS_CACHE.routes[r.id] = r
+          routes_select.appendChild(OptionFactory(r.id, r.code).b())
+        })).then(() => hideLoader())
+      })
+    })
+
+    routes_select.addEventListener("change", e => {
+      if(e.target.value === "") return
+      bruss_api("map/trips_route?" + new URLSearchParams({type: BRUSS_CACHE.areas[areas_select.value].type, route: e.target.value})).then(trips => {
+        paths = new Set()
+        for(const t of trips) {
+          // console.log(trips)
+          BRUSS_CACHE.trips[t.id] = t
+          paths.add(t.path)
+        }
+        segments = {}
+        Promise.all(Array.from(paths).map(p => {
+          return bruss_api(`map/path/${p}`).then(p => {
+            // console.log(p)
+            BRUSS_CACHE.paths[p.id] = p
+            let prev = p.sequence[0]
+            p.segments = []
+            for(const s of p.sequence.slice(1)) {
+              if(!(prev in segments)) {
+                segments[prev] = []
+              }
+              segments[prev].push(s)
+              p.segments.push([prev, s])
+              prev = s
+            }
+          })
+        })).then(() => {
+          for(const t of trips) {
+              t.path = BRUSS_CACHE.paths[t.path]
+          }
+          const req_segments = Object.keys(segments).flatMap(v => segments[v].map(vv => [parseInt(v), vv])).filter(s => !BRUSS_CACHE.segments.contains(s[0], s[1]))
+          bruss_api(
+            "map/segments",
+            {
+                method: "post", 
+                headers: {"content-type": "application/json"}, 
+                body: JSON.stringify({"stops": req_segments}) 
+            }
+          ).then(segments => {
+            Promise.all(Object.keys(segments).map(async s => {
+              BRUSS_CACHE.segments.insert(segments[s])
+            })).then(() => {
+              // console.log("Bruss cache now:", BRUSS_CACHE)
+              draw_segments(trips[0], BRUSS_CACHE.routes[e.target.value].color)
             })
-            .catch(e => {
-              console.error(e)
-              alert(e)
-            })
+          })
         })
-        .catch(e => {
-          console.error(e)
-          alert(e)
-        })
+      })
+    })
+
+    function draw_segments(trip, color) {
+      MAP_OBJ.segments.clearLayers()
+      Promise.all(trip.path.segments.map(async s => {
+        s = BRUSS_CACHE.segments.get(s[0], s[1])
+        from = BRUSS_CACHE.stops[s.from]
+        to = BRUSS_CACHE.stops[s.to]
+        label = `${from.name} -> ${to.name}`
+        const poly = L.polyline(
+          s.coords, 
+          {color: `#${color}`, weight: 5, opacity: 1}
+        )
+          .bindTooltip(label)
+          .addEventListener("mouseover", e => {
+            e.target.setStyle({weight: 10})
+            from = BRUSS_CACHE.stops[e.target.bruss_obj.from]
+            to = BRUSS_CACHE.stops[e.target.bruss_obj.to]
+            for(const s of [from.map_obj, to.map_obj]) {
+              s.addTo(map)
+            }
+          })
+          .addEventListener("mouseout",  e => {
+            e.target.setStyle({weight: 5})
+            from = BRUSS_CACHE.stops[e.target.bruss_obj.from]
+            to = BRUSS_CACHE.stops[e.target.bruss_obj.to]
+            for(const s of [from.map_obj, to.map_obj]) {
+              s.removeFrom(map)
+            }
+          })
+          .addTo(MAP_OBJ.segments)
+        poly.bruss_obj = s
+      })).then(() => MAP_OBJ.segments.addTo(map))
+    }
+
+    function SegmentContainer() {
+      return {
+        _cont: {},
+        insert: function(s) {
+          if(!(s.from in this._cont)) {
+            this._cont[s.from] = {}
+          }
+          this._cont[s.from][s.to] = s
+        },
+        pop: function(from, to) {
+          return this._cont[from][to]
+        },
+        flatten: function() {
+          return this.map(t => t)
+        },
+        map: function(f) {
+          const o = []
+          for(const c in this._cont) {
+            for(const cc in this._cont[c]) {
+              o.push(f(this._cont[c][cc]))
+            }
+          }
+        },
+        contains: function(from, to) {
+          return from in this._cont && to in this._cont[from]
+        },
+        get: function(from, to) {
+          return this._cont[from][to]
+        }
+      }
+    }
+
+    function OptionFactory(v=null, i=null) {
+      return {
+        _value: v,
+        _innerHTML: i,
+        value: function(v) { this._value = v },
+        innerHTML: function(i) { this._innerHTML = i },
+        b: function() {
+          let opt = document.createElement("option")
+          opt.value = this._value
+          opt.innerHTML = this._innerHTML
+          return opt
+        },
+      }
+    }
+
+    function simulation() {
+      areas_select.value = 23
+      areas_select.dispatchEvent(new Event("change"))
+      setTimeout(() => {
+        routes_select.value = 400 
+        routes_select.dispatchEvent(new Event("change"))
+      }, 500)
     }
   </script>
 
 <script>
     function appendLoader(parent, text=null, hidden=false) {
-        let out = document.createElement("div")
-        if (hidden)
-            out.classList.add("hidden")
-        let inn = document.createElement("div")
-        inn.appendChild(document.createElement("div"))
-        inn.classList.add("lds-circle")
-        out.appendChild(inn)
-        out.innerHTML += "<span>" + (text === null ? "Loading..." : text) + "</span>"
-        parent.appendChild(out)
-        return out
+      let out = document.createElement("div")
+      if (hidden)
+          out.classList.add("hidden")
+      let inn = document.createElement("div")
+      inn.appendChild(document.createElement("div"))
+      inn.classList.add("lds-circle")
+      out.appendChild(inn)
+      out.innerHTML += "<span>" + (text === null ? "Loading..." : text) + "</span>"
+      parent.appendChild(out)
+      return out
     }
 
-    function hideLoader(loader) {
-        loader.classList.add("hidden")
+    function hideLoader() {
+      LOADER.classList.add("hidden")
     }
 
-    function showLoader(loader) {
-        loader.classList.remove("hidden")
+    function showLoader() {
+      LOADER.classList.remove("hidden")
     }
 
-    const loader = appendLoader(document.getElementById("control_panel"), "")
+    const LOADER = appendLoader(document.getElementById("control_panel"), "")
+    // hideLoader()
 </script>
 </html>
