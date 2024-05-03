@@ -53,6 +53,8 @@
       <select id="routes_select">
         <option value="">---</option>
       </select>
+      <input type="button" name="" value="←" onclick="seek_trip(-1)">
+      <input type="button" name="" value="→" onclick="seek_trip(+1)">
     </div>
   </body>
   <script>
@@ -103,7 +105,7 @@
         const circle = L.circleMarker(
           s.position,
           {radius: 2, color: "black", fillOpacity: 1}
-        ).bindTooltip(`${s.name} <${s.id}>`).addTo(MAP_OBJ.stops)
+        ).bindTooltip(`${s.name} (${s.id})`).addTo(MAP_OBJ.stops)
         BRUSS_CACHE.stops[s.id] = s
         BRUSS_CACHE.stops[s.id].map_obj = circle
         circle.bruss_obj = s
@@ -186,9 +188,11 @@
       if(e.target.value === "") return
       bruss_api("map/trips_route?" + new URLSearchParams({type: BRUSS_CACHE.areas[areas_select.value].type, route: e.target.value})).then(trips => {
         paths = new Set()
+        BRUSS_CACHE.routes[e.target.value].trips = []
         for(const t of trips) {
           // console.log(trips)
           BRUSS_CACHE.trips[t.id] = t
+          BRUSS_CACHE.routes[e.target.value].trips.push(t.id)
           paths.add(t.path)
         }
         segments = {}
@@ -224,22 +228,40 @@
               BRUSS_CACHE.segments.insert(segments[s])
             })).then(() => {
               // console.log("Bruss cache now:", BRUSS_CACHE)
-              draw_segments(trips[0], BRUSS_CACHE.routes[e.target.value].color)
+              if(BRUSS_CACHE.routes[e.target.value].trips.length == 0) BRUSS_CACHE.selected_trip = null
+              else BRUSS_CACHE.selected_trip = 0
+              draw_segments()
             })
           })
         })
       })
     })
 
-    function draw_segments(trip, color) {
+    function seek_trip(seek) {
+      BRUSS_CACHE.selected_trip = Math.max(Math.min(
+        BRUSS_CACHE.routes[routes_select.value].trips.length, 
+        BRUSS_CACHE.selected_trip + seek
+      ), 0)
+      console.log("Seeking to trip:", BRUSS_CACHE.trips[BRUSS_CACHE.routes[routes_select.value].trips[BRUSS_CACHE.selected_trip]].id)
+      draw_segments()
+    }
+
+    function draw_segments() {
       MAP_OBJ.segments.clearLayers()
+      if(BRUSS_CACHE.selected_trip === null) return
+      route = BRUSS_CACHE.routes[routes_select.value]
+      trip = route.trips[BRUSS_CACHE.selected_trip]
+      color = route.color
+      if(color == "CCCCCC") color = "000000"
+      trip = BRUSS_CACHE.trips[route.trips[BRUSS_CACHE.selected_trip]]
+      console.log(trip)
       Promise.all(trip.path.segments.map(async s => {
         s = BRUSS_CACHE.segments.get(s[0], s[1])
         from = BRUSS_CACHE.stops[s.from]
         to = BRUSS_CACHE.stops[s.to]
-        label = `${from.name} -> ${to.name}`
+        label = `${from.name} (${from.id}) -> ${to.name} (${to.id})`
         const poly = L.polyline(
-          s.coords, 
+          s.coords,
           {color: `#${color}`, weight: 5, opacity: 1}
         )
           .bindTooltip(label)
@@ -261,6 +283,7 @@
           })
           .addTo(MAP_OBJ.segments)
         poly.bruss_obj = s
+        s.leaflet = poly
       })).then(() => MAP_OBJ.segments.addTo(map))
     }
 
@@ -310,6 +333,10 @@
         },
       }
     }
+
+    addEventListener("keypress", e => {
+      console.log(e)
+    })
 
     function simulation() {
       areas_select.value = 23
