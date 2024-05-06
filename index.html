@@ -3,61 +3,86 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
-      #map { height: 90vh; }
-
       .lds-circle {
           display: inline-block;
           transform: translateZ(1px);
+      }
+      .lds-circle > div {
+        display: inline-block;
+        width: 2em;
+        height: 2em;
+        border-radius: 50%;
+        background: #000;
+        animation: lds-circle 2.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+      }
+      @keyframes lds-circle {
+        0%, 100% {
+          animation-timing-function: cubic-bezier(0.5, 0, 1, 0.5);
         }
-        .lds-circle > div {
-          display: inline-block;
-          width: 2em;
-          height: 2em;
-          border-radius: 50%;
-          background: #000;
-          animation: lds-circle 2.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+        0% {
+          transform: rotateY(0deg);
         }
-        @keyframes lds-circle {
-          0%, 100% {
-            animation-timing-function: cubic-bezier(0.5, 0, 1, 0.5);
-          }
-          0% {
-            transform: rotateY(0deg);
-          }
-          50% {
-            transform: rotateY(1800deg);
-            animation-timing-function: cubic-bezier(0, 0.5, 0.5, 1);
-          }
-          100% {
-            transform: rotateY(3600deg);
-          } 
+        50% {
+          transform: rotateY(1800deg);
+          animation-timing-function: cubic-bezier(0, 0.5, 0.5, 1);
         }
+        100% {
+          transform: rotateY(3600deg);
+        } 
+      }
         
-        .hidden {
-          display: none;
-        }
+      .hidden {
+        display: none;
+      }
+
+      /* body { */
+      /*   display: flex; */
+      /*   justify-content: ; */
+      /* } */
+
+      #map { 
+        height: 80vh;
+        min-width: 80%;
+      }
+
+      #controls {
+        display: block;
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <div id="control_panel" style="display: flex; ">
-      <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJ.stops)">
-      <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJ.segments)">
-      <input type="button" value="Draw" onclick="draw()"> 
-    </div>
-    <div id="selector">
-      <select id="areas_select">
+    <!-- <div id="control_panel" style="display: flex; "> -->
+    <!--   <input type="button" value="Toggle Stops" onclick="toggle_layer(MAP_OBJ.stops)"> -->
+    <!--   <input type="button" value="Toggle Segments" onclick="toggle_layer(MAP_OBJ.segments)"> -->
+    <!--   <input type="button" value="Draw" onclick="draw()">  -->
+    <!-- </div> -->
+    <div id="controls">
+      <select id="area_select">
         <option value="">---</option>
       </select>
       <br>
-      <select id="routes_select">
+      <input type="button" name="" value="←" onclick="seek_route(-1)">
+      <input type="button" name="" value="→" onclick="seek_route(+1)">
+      <select id="route_select">
         <option value="">---</option>
       </select>
+      <br>
       <input type="button" name="" value="←" onclick="seek_trip(-1)">
       <input type="button" name="" value="→" onclick="seek_trip(+1)">
+      <select id="trip_select">
+        <option value="">---</option>
+      </select>
     </div>
   </body>
   <script>
+    const clamp = (num, min, max) => Math.min(Math.max(num, min), max)
+    const overflow = (num, max) => {
+      if(num >= max) return num % max
+      else if(num < 0) return max + num
+      else return num
+    }
+
     var map = L.map('map').setView([46.0620, 11.1294], 14);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -123,8 +148,8 @@
     //   }
     // ))
 
-    const areas_select = document.getElementById("areas_select")
-    const routes_select = document.getElementById("routes_select")
+    const area_select = document.getElementById("area_select")
+    const route_select = document.getElementById("route_select")
     futures.push(bruss_api("map/areas").then(areas => {
       BRUSS_CACHE.areas = {}
       areas.forEach(a => {
@@ -132,7 +157,7 @@
         let opt = document.createElement("option")
         opt.value = a.id
         opt.innerHTML = a.label
-        areas_select.appendChild(opt)
+        area_select.appendChild(opt)
       })
     }))
 
@@ -172,21 +197,26 @@
       }
     }
 
-    areas_select.addEventListener("change", e => {
-      routes_select.innerHTML = ""
-      routes_select.appendChild(OptionFactory("", "---").b())
+    area_select.addEventListener("change", e => {
+      route_select.innerHTML = ""
+      route_select.appendChild(OptionFactory("", "---").b())
       showLoader()
-      bruss_api("map/routes?" + new URLSearchParams({area: areas_select.value})).then(routes => {
+      bruss_api("map/routes?" + new URLSearchParams({area: area_select.value})).then(routes => {
         Promise.all(routes.map(async r => {
           BRUSS_CACHE.routes[r.id] = r
-          routes_select.appendChild(OptionFactory(r.id, r.code).b())
+          route_select.appendChild(OptionFactory(r.id, r.code).b())
         })).then(() => hideLoader())
       })
     })
 
-    routes_select.addEventListener("change", e => {
+    route_select.addEventListener("change", e => {
+      BRUSS_CACHE.selected_trip = null
+      // clean current trip
+      draw_segments()
+      console.log(e.target.value)
       if(e.target.value === "") return
-      bruss_api("map/trips_route?" + new URLSearchParams({type: BRUSS_CACHE.areas[areas_select.value].type, route: e.target.value})).then(trips => {
+      showLoader()
+      bruss_api("map/trips_route?" + new URLSearchParams({type: BRUSS_CACHE.areas[area_select.value].type, route: e.target.value})).then(trips => {
         paths = new Set()
         BRUSS_CACHE.routes[e.target.value].trips = []
         for(const t of trips) {
@@ -212,21 +242,27 @@
             }
           })
         })).then(() => {
-          for(const t of trips) {
-              t.path = BRUSS_CACHE.paths[t.path]
+          trip_select.innerHTML = ""
+          for(const i in trips) {
+            const t = trips[i]
+            t.path = BRUSS_CACHE.paths[t.path]
+            let first = BRUSS_CACHE.stops[t.path.sequence[0]]
+            let last = BRUSS_CACHE.stops[t.path.sequence.at(-1)]
+            trip_select.appendChild(OptionFactory(i, `${first.name} (${t.times[first.id].departure}) - ${last.name} (${t.times[last.id].departure})`).b())
           }
           const req_segments = Object.keys(segments).flatMap(v => segments[v].map(vv => [parseInt(v), vv])).filter(s => !BRUSS_CACHE.segments.contains(s[0], s[1]))
           bruss_api(
             "map/segments",
             {
-                method: "post", 
-                headers: {"content-type": "application/json"}, 
-                body: JSON.stringify({"stops": req_segments}) 
+              method: "post", 
+              headers: {"content-type": "application/json"}, 
+              body: JSON.stringify({"stops": req_segments, type: BRUSS_CACHE.routes[e.target.value].area_ty}) 
             }
           ).then(segments => {
             Promise.all(Object.keys(segments).map(async s => {
               BRUSS_CACHE.segments.insert(segments[s])
             })).then(() => {
+              hideLoader()
               // console.log("Bruss cache now:", BRUSS_CACHE)
               if(BRUSS_CACHE.routes[e.target.value].trips.length == 0) BRUSS_CACHE.selected_trip = null
               else BRUSS_CACHE.selected_trip = 0
@@ -237,23 +273,39 @@
       })
     })
 
-    function seek_trip(seek) {
-      BRUSS_CACHE.selected_trip = Math.max(Math.min(
-        BRUSS_CACHE.routes[routes_select.value].trips.length, 
-        BRUSS_CACHE.selected_trip + seek
-      ), 0)
-      console.log("Seeking to trip:", BRUSS_CACHE.trips[BRUSS_CACHE.routes[routes_select.value].trips[BRUSS_CACHE.selected_trip]].id)
+    trip_select.addEventListener("change", e => {
+      BRUSS_CACHE.selected_trip = e.target.value
       draw_segments()
+    })
+
+    function seek_trip(seek) {
+      trip_select.value = trip_select.options[overflow(trip_select.selectedIndex + seek, trip_select.options.length)].value
+      trip_select.dispatchEvent(new Event("change"))
     }
+
+    function seek_route(seek) {
+      route_select.value = route_select.options[overflow(route_select.selectedIndex + seek, route_select.options.length)].value
+      route_select.dispatchEvent(new Event("change"))
+    }
+
+    // function draw_trip_info(trip) {
+    //   if(trip === null) {
+    //     trip_info.innerHTML = "No trips available"
+    //   } else {
+    //     
+    //   }
+    // }
 
     function draw_segments() {
       MAP_OBJ.segments.clearLayers()
-      if(BRUSS_CACHE.selected_trip === null) return
-      route = BRUSS_CACHE.routes[routes_select.value]
-      trip = route.trips[BRUSS_CACHE.selected_trip]
+      if(BRUSS_CACHE.selected_trip === null) {
+      //   draw_trip_info(null)
+        return
+      }
+      route = BRUSS_CACHE.routes[route_select.value]
+      trip = BRUSS_CACHE.trips[route.trips[BRUSS_CACHE.selected_trip]]
       color = route.color
       if(color == "CCCCCC") color = "000000"
-      trip = BRUSS_CACHE.trips[route.trips[BRUSS_CACHE.selected_trip]]
       console.log(trip)
       Promise.all(trip.path.segments.map(async s => {
         s = BRUSS_CACHE.segments.get(s[0], s[1])
@@ -334,16 +386,31 @@
       }
     }
 
-    addEventListener("keypress", e => {
-      console.log(e)
+    addEventListener("keydown", e => {
+      switch(e.keyCode) {
+        case 37: // left
+          seek_trip(-1)
+          break
+        case 38: // up
+          seek_route(1)
+          break
+        case 39:
+          seek_trip(1)
+          break
+        case 40:
+          seek_route(-1)
+          break
+        default:
+
+      }
     })
 
     function simulation() {
-      areas_select.value = 23
-      areas_select.dispatchEvent(new Event("change"))
+      area_select.value = 23
+      area_select.dispatchEvent(new Event("change"))
       setTimeout(() => {
-        routes_select.value = 400 
-        routes_select.dispatchEvent(new Event("change"))
+        route_select.value = 400 
+        route_select.dispatchEvent(new Event("change"))
       }, 500)
     }
   </script>
@@ -370,7 +437,7 @@
       LOADER.classList.remove("hidden")
     }
 
-    const LOADER = appendLoader(document.getElementById("control_panel"), "")
+    const LOADER = appendLoader(document.getElementById("controls"), "")
     // hideLoader()
 </script>
 </html>
