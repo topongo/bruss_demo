@@ -90,7 +90,7 @@
     }).addTo(map);
 
     const BRUSS_CACHE = {
-      stops: {},
+      stops: {"u": {}, "e": {}},
       segments: SegmentContainer(),
       routes: {},
       trips: {},
@@ -131,8 +131,8 @@
           s.position,
           {radius: 2, color: "black", fillOpacity: 1}
         ).bindTooltip(`${s.name} (${s.id})`).addTo(MAP_OBJ.stops)
-        BRUSS_CACHE.stops[s.id] = s
-        BRUSS_CACHE.stops[s.id].map_obj = circle
+        BRUSS_CACHE.stops[s.type][s.id] = s
+        BRUSS_CACHE.stops[s.type][s.id].map_obj = circle
         circle.bruss_obj = s
       }))
         .then(() => console.log(`Fetched ${MAP_OBJ.stops.length} segments!`))
@@ -246,8 +246,8 @@
           for(const i in trips) {
             const t = trips[i]
             t.path = BRUSS_CACHE.paths[t.path]
-            let first = BRUSS_CACHE.stops[t.path.sequence[0]]
-            let last = BRUSS_CACHE.stops[t.path.sequence.at(-1)]
+            let first = BRUSS_CACHE.stops[t.type][t.path.sequence[0]]
+            let last = BRUSS_CACHE.stops[t.type][t.path.sequence.at(-1)]
             trip_select.appendChild(OptionFactory(i, `${first.name} (${t.times[first.id].departure}) - ${last.name} (${t.times[last.id].departure})`).b())
           }
           const req_segments = Object.keys(segments).flatMap(v => segments[v].map(vv => [parseInt(v), vv])).filter(s => !BRUSS_CACHE.segments.contains(s[0], s[1]))
@@ -309,8 +309,8 @@
       console.log(trip)
       Promise.all(trip.path.segments.map(async s => {
         s = BRUSS_CACHE.segments.get(s[0], s[1])
-        from = BRUSS_CACHE.stops[s.from]
-        to = BRUSS_CACHE.stops[s.to]
+        from = BRUSS_CACHE.stops[s.type][s.from]
+        to = BRUSS_CACHE.stops[s.type][s.to]
         label = `${from.name} (${from.id}) -> ${to.name} (${to.id})`
         const poly = L.polyline(
           s.coords,
@@ -318,17 +318,19 @@
         )
           .bindTooltip(label)
           .addEventListener("mouseover", e => {
+            seg = e.target.bruss_obj
             e.target.setStyle({weight: 10})
-            from = BRUSS_CACHE.stops[e.target.bruss_obj.from]
-            to = BRUSS_CACHE.stops[e.target.bruss_obj.to]
+            from = BRUSS_CACHE.stops[seg.type][seg.from]
+            to = BRUSS_CACHE.stops[seg.type][seg.to]
             for(const s of [from.map_obj, to.map_obj]) {
               s.addTo(map)
             }
           })
           .addEventListener("mouseout",  e => {
+            seg = e.target.bruss_obj
             e.target.setStyle({weight: 5})
-            from = BRUSS_CACHE.stops[e.target.bruss_obj.from]
-            to = BRUSS_CACHE.stops[e.target.bruss_obj.to]
+            from = BRUSS_CACHE.stops[seg.type][seg.from]
+            to = BRUSS_CACHE.stops[seg.type][seg.to]
             for(const s of [from.map_obj, to.map_obj]) {
               s.removeFrom(map)
             }
